@@ -8,6 +8,10 @@ var vertexCount = 0;
 var uniformModelViewLoc = null;
 var uniformProjectionLoc = null;
 var heightmapData = null;
+var yRotation = 0.0;
+var zRotation = 0.0;    
+var eyeDistance = 10.0; 
+var heightMultiplier = 5.0;
 
 function processImage(img)
 {
@@ -54,6 +58,48 @@ function processImage(img)
 }
 
 
+function createTerrainMesh(heightmapData) {
+    const positions = [];
+    const { data, width, height } = heightmapData;
+
+    const scale_of_Y = heightMultiplier;       
+    const scale_of_XZ = 0.1; 
+	
+		for (let z = 0; z < height - 1; z++) {
+			for (let x = 0; x < width - 1; x++) {
+
+				// all the vertextes being created and scaled
+				const x1 = (x - width / 2) * scale_of_XZ;
+				const y1 = data[z * width + x] * scale_of_Y;
+				const z1 = (z - height / 2) * scale_of_XZ;
+				const x2 = ((x + 1) - width / 2) * scale_of_XZ;
+				const y2 = data[z * width + (x + 1)] * scale_of_Y;
+				const z2 = (z - height / 2) * scale_of_XZ;
+				const x3 = (x - width / 2) * scale_of_XZ;
+				const y3 = data[(z + 1) * width + x] * scale_of_Y;
+				const z3 = ((z + 1) - height / 2) * scale_of_XZ;
+				const x4 = ((x + 1) - width / 2) * scale_of_XZ;
+				const y4 = data[(z + 1) * width + (x + 1)] * scale_of_Y;
+				const z4 = ((z + 1) - height / 2) * scale_of_XZ;
+
+
+				// first triangle of quad
+				positions.push(x1, y1, z1);
+				positions.push(x2, y2, z2);
+				positions.push(x3, y3, z3);
+				
+				// second triangle of quad
+				positions.push(x2, y2, z2);
+				positions.push(x4, y4, z4);
+				positions.push(x3, y3, z3);
+			}
+		}
+		return positions;
+
+
+}
+
+
 window.loadImageFile = function(event)
 {
 
@@ -79,6 +125,19 @@ window.loadImageFile = function(event)
 					heightmapData.width: width of map (number of columns)
 					heightmapData.height: height of the map (number of rows)
 			*/
+
+			const terrainPositions = createTerrainMesh(heightmapData);
+			vertexCount = terrainPositions.length / 3;
+			const terrainVertices = new Float32Array(terrainPositions);
+            const posBuffer = createBuffer(gl, gl.ARRAY_BUFFER, terrainVertices);
+			const posAttribLoc = gl.getAttribLocation(program, "position");
+
+			vao = createVAO(gl,
+                posAttribLoc, posBuffer,
+                null, null,
+                null, null
+            );
+
 			console.log('loaded image: ' + heightmapData.width + ' x ' + heightmapData.height);
 
 		};
@@ -123,14 +182,15 @@ function draw()
 		farClip,
 	);
 
-	// eye and target
+
+	// here are the variables to adjust transforamtions to model. Adjusted eye and target so that they can be morphed 
+	// anc changed rather than being static as it was just hardcoded size.
 	var eye = [0, 5, 5];
 	var target = [0, 0, 0];
 
 	var modelMatrix = identityMatrix();
 
-	// TODO: set up transformations to the model
-
+	
 	// setup viewing matrix
 	var eyeToTarget = subtract(target, eye);
 	var viewMatrix = setupViewMatrix(eye, target);
@@ -295,6 +355,34 @@ function initialize()
 
 	// add mouse callbacks
 	addMouseCallback(canvas);
+
+	const rotationSlider = document.getElementById('rotation');
+    const zoomSlider = document.getElementById('scale');
+    const heightSlider = document.getElementById('height');
+
+    rotationSlider.addEventListener('input', (event) => {
+        const angleInDegrees = parseFloat(event.target.value);
+        yRotation = angleInDegrees * Math.PI / 180.0;
+    });
+
+    zoomSlider.addEventListener('input', (event) => {
+        const sliderValue = parseFloat(event.target.value); 
+        eyeDistance = 15.0 - (sliderValue / 200.0) * 14.0;
+    });
+
+    heightSlider.addEventListener('input', (event) => {
+        const sliderValue = parseFloat(event.target.value); 
+        heightMultiplier = sliderValue / 10.0;
+
+        if (heightmapData) {
+            const terrainPositions = createTerrainMesh(heightmapData);
+            vertexCount = terrainPositions.length / 3;
+            const terrainVertices = new Float32Array(terrainPositions);
+            const posBuffer = createBuffer(gl, gl.ARRAY_BUFFER, terrainVertices);
+            const posAttribLoc = gl.getAttribLocation(program, "position");
+            vao = createVAO(gl, posAttribLoc, posBuffer, null, null, null, null);
+        }
+    });
 
 	var box = createBox();
 	vertexCount = box.positions.length / 3;		// vertexCount is global variable used by draw()
