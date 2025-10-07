@@ -55,7 +55,16 @@
                 <td><input value="50" id="height" type="range" min="0" max="100" value="0">
                 </td>
             </tr>
-
+            
+            <tr>
+                <td>Projection</td>
+                <td>
+                    <select id="projectionType">
+                        <option value="perspective" selected>Perspective</option>
+                        <option value="orthographic">Orthographic</option>
+                    </select>
+                </td>
+            </tr>
             <tr>
                 <td>Load image</td>
                 <td><input type="file" id="fileInput" onchange="loadImageFile(event)">

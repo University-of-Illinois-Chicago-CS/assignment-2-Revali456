@@ -12,6 +12,11 @@ var yRotation = 0.0;
 var zRotation = 0.0;    
 var eyeDistance = 10.0; 
 var heightMultiplier = 5.0;
+var projectionType = 'perspective';
+var xRotation = 0.5; 
+var cameraTarget = [0, 0, 0]; 
+var cameraRight = [1, 0, 0]; 
+var cameraUp = [0, 1, 0]; 
 
 function processImage(img)
 {
@@ -162,6 +167,9 @@ function setupViewMatrix(eye, target)
     var right = normalize(cross(forward, upHint));
     var up    = cross(right, forward);
 
+	cameraRight = right;
+    cameraUp = up;
+
     var view = lookAt(eye, target, up);
     return view;
 
@@ -175,21 +183,37 @@ function draw()
 	var farClip = 20.0;
 
 	// perspective projection
-	var projectionMatrix = perspectiveMatrix(
-		fovRadians,
-		aspectRatio,
-		nearClip,
-		farClip,
-	);
+    var projectionMatrix;
+    if (projectionType === 'perspective') {
+        // perspective projection
+        projectionMatrix = perspectiveMatrix(
+            fovRadians,
+            aspectRatio,
+            nearClip,
+            farClip,
+        );
+    } else { // 'orthographic'
+        // Define the viewing volume for the orthographic projection
+        const orthoBounds = 15.0; // Controls the "zoom" level of the ortho view
+        projectionMatrix = orthographicMatrix(
+            -orthoBounds * aspectRatio, orthoBounds * aspectRatio, // left, right
+            -orthoBounds, orthoBounds,                             // bottom, top
+            0.001, 100.0                                           // near, far
+        );
+    }
 
 
 	// here are the variables to adjust transforamtions to model. Adjusted eye and target so that they can be morphed 
 	// anc changed rather than being static as it was just hardcoded size.
-	var eye = [0, 5, 5];
-	var target = [0, 0, 0];
+	const cameraDirection = normalize([0, 1, 1]);
+    const camX = cameraTarget[0] + eyeDistance * Math.sin(yRotation) * Math.cos(xRotation);
+    const camY = cameraTarget[1] + eyeDistance * Math.sin(xRotation);
+    const camZ = cameraTarget[2] + eyeDistance * Math.cos(yRotation) * Math.cos(xRotation);
+    var eye = [camX, camY, camZ];
+    
+    var target = cameraTarget;
 
 	var modelMatrix = identityMatrix();
-
 	
 	// setup viewing matrix
 	var eyeToTarget = subtract(target, eye);
@@ -324,17 +348,35 @@ function addMouseCallback(canvas)
 		}
 	});
 
-	document.addEventListener("mousemove", function (e) {
-		if (!isDragging) return;
-		var currentX = e.offsetX;
-		var currentY = e.offsetY;
+    document.addEventListener("mousemove", function (e) {
+        if (!isDragging) return;
+        
+        const rotateSensitivity = 0.005;
+        const panSensitivity = 0.01;
+        
+        var currentX = e.offsetX;
+        var currentY = e.offsetY;
 
-		var deltaX = currentX - startX;
-		var deltaY = currentY - startY;
-		console.log('mouse drag by: ' + deltaX + ', ' + deltaY);
+        var deltaX = currentX - startX;
+        var deltaY = currentY - startY;
+        
+        if (e.shiftKey) {
+            const panX = multiplyScalarVector(-deltaX * panSensitivity, cameraRight);
+            const panY = multiplyScalarVector(deltaY * panSensitivity, cameraUp);
+            
+            cameraTarget = add(cameraTarget, add(panX, panY));
 
-		// implement dragging logic
-	});
+        } else {
+            yRotation -= deltaX * rotateSensitivity;
+            xRotation -= deltaY * rotateSensitivity;
+
+            const maxVerticalAngle = Math.PI / 2 - 0.01; 
+            xRotation = Math.max(-maxVerticalAngle, Math.min(maxVerticalAngle, xRotation));
+        }
+
+        startX = currentX;
+        startY = currentY;
+    });
 
 	document.addEventListener("mouseup", function () {
 		isDragging = false;
@@ -359,6 +401,8 @@ function initialize()
 	const rotationSlider = document.getElementById('rotation');
     const zoomSlider = document.getElementById('scale');
     const heightSlider = document.getElementById('height');
+	const projectionSelector = document.getElementById('projectionType');
+
 
     rotationSlider.addEventListener('input', (event) => {
         const angleInDegrees = parseFloat(event.target.value);
@@ -382,6 +426,10 @@ function initialize()
             const posAttribLoc = gl.getAttribLocation(program, "position");
             vao = createVAO(gl, posAttribLoc, posBuffer, null, null, null, null);
         }
+	
+	projectionSelector.addEventListener('change', (event) => {
+			projectionType = event.target.value;
+	});
     });
 
 	var box = createBox();
