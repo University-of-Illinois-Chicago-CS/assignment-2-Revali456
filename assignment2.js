@@ -8,6 +8,15 @@ var vertexCount = 0;
 var uniformModelViewLoc = null;
 var uniformProjectionLoc = null;
 var heightmapData = null;
+var yRotation = 0.0;
+var zRotation = 0.0;    
+var eyeDistance = 10.0; 
+var heightMultiplier = 5.0;
+var projectionType = 'perspective';
+var xRotation = 0.5; 
+var cameraTarget = [0, 0, 0]; 
+var cameraRight = [1, 0, 0]; 
+var cameraUp = [0, 1, 0]; 
 
 function processImage(img)
 {
@@ -54,6 +63,48 @@ function processImage(img)
 }
 
 
+function createTerrainMesh(heightmapData) {
+    const positions = [];
+    const { data, width, height } = heightmapData;
+
+    const scale_of_Y = heightMultiplier;       
+    const scale_of_XZ = 0.1; 
+	
+		for (let z = 0; z < height - 1; z++) {
+			for (let x = 0; x < width - 1; x++) {
+
+				// all the vertextes being created and scaled
+				const x1 = (x - width / 2) * scale_of_XZ;
+				const y1 = data[z * width + x] * scale_of_Y;
+				const z1 = (z - height / 2) * scale_of_XZ;
+				const x2 = ((x + 1) - width / 2) * scale_of_XZ;
+				const y2 = data[z * width + (x + 1)] * scale_of_Y;
+				const z2 = (z - height / 2) * scale_of_XZ;
+				const x3 = (x - width / 2) * scale_of_XZ;
+				const y3 = data[(z + 1) * width + x] * scale_of_Y;
+				const z3 = ((z + 1) - height / 2) * scale_of_XZ;
+				const x4 = ((x + 1) - width / 2) * scale_of_XZ;
+				const y4 = data[(z + 1) * width + (x + 1)] * scale_of_Y;
+				const z4 = ((z + 1) - height / 2) * scale_of_XZ;
+
+
+				// first triangle of quad
+				positions.push(x1, y1, z1);
+				positions.push(x2, y2, z2);
+				positions.push(x3, y3, z3);
+				
+				// second triangle of quad
+				positions.push(x2, y2, z2);
+				positions.push(x4, y4, z4);
+				positions.push(x3, y3, z3);
+			}
+		}
+		return positions;
+
+
+}
+
+
 window.loadImageFile = function(event)
 {
 
@@ -79,6 +130,19 @@ window.loadImageFile = function(event)
 					heightmapData.width: width of map (number of columns)
 					heightmapData.height: height of the map (number of rows)
 			*/
+
+			const terrainPositions = createTerrainMesh(heightmapData);
+			vertexCount = terrainPositions.length / 3;
+			const terrainVertices = new Float32Array(terrainPositions);
+            const posBuffer = createBuffer(gl, gl.ARRAY_BUFFER, terrainVertices);
+			const posAttribLoc = gl.getAttribLocation(program, "position");
+
+			vao = createVAO(gl,
+                posAttribLoc, posBuffer,
+                null, null,
+                null, null
+            );
+
 			console.log('loaded image: ' + heightmapData.width + ' x ' + heightmapData.height);
 
 		};
@@ -103,6 +167,9 @@ function setupViewMatrix(eye, target)
     var right = normalize(cross(forward, upHint));
     var up    = cross(right, forward);
 
+	cameraRight = right;
+    cameraUp = up;
+
     var view = lookAt(eye, target, up);
     return view;
 
@@ -116,21 +183,38 @@ function draw()
 	var farClip = 20.0;
 
 	// perspective projection
-	var projectionMatrix = perspectiveMatrix(
-		fovRadians,
-		aspectRatio,
-		nearClip,
-		farClip,
-	);
+    var projectionMatrix;
+    if (projectionType === 'perspective') {
+        // perspective projection
+        projectionMatrix = perspectiveMatrix(
+            fovRadians,
+            aspectRatio,
+            nearClip,
+            farClip,
+        );
+    } else { // 'orthographic'
+        // Define the viewing volume for the orthographic projection
+        const orthoBounds = 15.0; // Controls the "zoom" level of the ortho view
+        projectionMatrix = orthographicMatrix(
+            -orthoBounds * aspectRatio, orthoBounds * aspectRatio, // left, right
+            -orthoBounds, orthoBounds,                             // bottom, top
+            0.001, 100.0                                           // near, far
+        );
+    }
 
-	// eye and target
-	var eye = [0, 5, 5];
-	var target = [0, 0, 0];
+
+	// here are the variables to adjust transforamtions to model. Adjusted eye and target so that they can be morphed 
+	// anc changed rather than being static as it was just hardcoded size.
+	const cameraDirection = normalize([0, 1, 1]);
+    const camX = cameraTarget[0] + eyeDistance * Math.sin(yRotation) * Math.cos(xRotation);
+    const camY = cameraTarget[1] + eyeDistance * Math.sin(xRotation);
+    const camZ = cameraTarget[2] + eyeDistance * Math.cos(yRotation) * Math.cos(xRotation);
+    var eye = [camX, camY, camZ];
+    
+    var target = cameraTarget;
 
 	var modelMatrix = identityMatrix();
-
-	// TODO: set up transformations to the model
-
+	
 	// setup viewing matrix
 	var eyeToTarget = subtract(target, eye);
 	var viewMatrix = setupViewMatrix(eye, target);
@@ -264,17 +348,35 @@ function addMouseCallback(canvas)
 		}
 	});
 
-	document.addEventListener("mousemove", function (e) {
-		if (!isDragging) return;
-		var currentX = e.offsetX;
-		var currentY = e.offsetY;
+    document.addEventListener("mousemove", function (e) {
+        if (!isDragging) return;
+        
+        const rotateSensitivity = 0.005;
+        const panSensitivity = 0.01;
+        
+        var currentX = e.offsetX;
+        var currentY = e.offsetY;
 
-		var deltaX = currentX - startX;
-		var deltaY = currentY - startY;
-		console.log('mouse drag by: ' + deltaX + ', ' + deltaY);
+        var deltaX = currentX - startX;
+        var deltaY = currentY - startY;
+        
+        if (e.shiftKey) {
+            const panX = multiplyScalarVector(-deltaX * panSensitivity, cameraRight);
+            const panY = multiplyScalarVector(deltaY * panSensitivity, cameraUp);
+            
+            cameraTarget = add(cameraTarget, add(panX, panY));
 
-		// implement dragging logic
-	});
+        } else {
+            yRotation -= deltaX * rotateSensitivity;
+            xRotation -= deltaY * rotateSensitivity;
+
+            const maxVerticalAngle = Math.PI / 2 - 0.01; 
+            xRotation = Math.max(-maxVerticalAngle, Math.min(maxVerticalAngle, xRotation));
+        }
+
+        startX = currentX;
+        startY = currentY;
+    });
 
 	document.addEventListener("mouseup", function () {
 		isDragging = false;
@@ -295,6 +397,40 @@ function initialize()
 
 	// add mouse callbacks
 	addMouseCallback(canvas);
+
+	const rotationSlider = document.getElementById('rotation');
+    const zoomSlider = document.getElementById('scale');
+    const heightSlider = document.getElementById('height');
+	const projectionSelector = document.getElementById('projectionType');
+
+
+    rotationSlider.addEventListener('input', (event) => {
+        const angleInDegrees = parseFloat(event.target.value);
+        yRotation = angleInDegrees * Math.PI / 180.0;
+    });
+
+    zoomSlider.addEventListener('input', (event) => {
+        const sliderValue = parseFloat(event.target.value); 
+        eyeDistance = 15.0 - (sliderValue / 200.0) * 14.0;
+    });
+
+    heightSlider.addEventListener('input', (event) => {
+        const sliderValue = parseFloat(event.target.value); 
+        heightMultiplier = sliderValue / 10.0;
+
+        if (heightmapData) {
+            const terrainPositions = createTerrainMesh(heightmapData);
+            vertexCount = terrainPositions.length / 3;
+            const terrainVertices = new Float32Array(terrainPositions);
+            const posBuffer = createBuffer(gl, gl.ARRAY_BUFFER, terrainVertices);
+            const posAttribLoc = gl.getAttribLocation(program, "position");
+            vao = createVAO(gl, posAttribLoc, posBuffer, null, null, null, null);
+        }
+	
+	projectionSelector.addEventListener('change', (event) => {
+			projectionType = event.target.value;
+	});
+    });
 
 	var box = createBox();
 	vertexCount = box.positions.length / 3;		// vertexCount is global variable used by draw()
